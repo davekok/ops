@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Operations;
 
+use JsonException;
 use RuntimeException;
 use Throwable;
 
@@ -25,17 +26,19 @@ class Main
     #[Option("V", "print verbose output")] public bool $verbose = false;
     #[Option(null, "define a command", env: "CMD_")] public array $commands;
 
+    /* Used by option $version */
     public function getVersionPattern(): string
     {
         return str_replace("/^", implode("|", $this->rings) . "|", Repository::VERSION_PATTERN);
     }
 
+    /** @throws JsonException */
     #[Command("L", "login to container registry", "--login [--registry REGISTRY] [--user USER] [--password PASSWORD]")]
     public function login(): void
     {
         $regSecret = "/run/secrets/registry-secret";
         if (file_exists($regSecret)) {
-            $registry = json_decode(file_get_contents($regSecret) ?: throw new RuntimeException($regSecret));
+            $registry = json_decode(file_get_contents($regSecret) ?: throw new RuntimeException($regSecret), false, 512, JSON_THROW_ON_ERROR);
             foreach ($registry->auths as $registry => $auth) {
                 $user = $auth->username;
                 $password = $auth->password;
@@ -47,7 +50,7 @@ class Main
             $password = $this->password ?? null;
         }
 
-        if (!isset($user) || !isset($password)) {
+        if (! isset($user, $password)) {
             return;
         }
 
@@ -64,7 +67,7 @@ class Main
     {
         $commands = isset($this->command) ? [$this->commands[$this->command]] : $this->commands;
         foreach ($commands as $command => $commandLine) {
-            $commandLine = str_replace(['${CWD}'], ["$this->currentDir"], $commandLine);
+            $commandLine = str_replace(['${CWD}'], [(string)$this->currentDir], $commandLine);
             echo "running $command: $commandLine\n";
             $this->exec($commandLine);
             echo "\n";
@@ -94,6 +97,8 @@ class Main
                     $images[] = "$repo => $version";
                 }
             }
+            unset($image);
+
             echo "Updating ", str_replace("$etc/", "", $file), ":\n - ", implode("\n - ", $images), "\n\n";
 
             yaml_emit_file($file, $yaml, encoding: YAML_UTF8_ENCODING, linebreak: YAML_LN_BREAK);
@@ -162,7 +167,7 @@ class Main
     }
 
     #[Command("g", "get a image", "--get [--image IMAGE] [--version VERSION]")]
-    public function get(): void
+    public function getImage(): void
     {
         $data = [];
         $tag = $this->version ?? $this->ring;

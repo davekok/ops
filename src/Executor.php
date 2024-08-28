@@ -9,7 +9,6 @@ use Throwable;
 
 final readonly class Executor
 {
-    private CurrentDirectory $currentDir;
     private ProgramReflector $program;
     private OptionParser $optionParser;
     private EnvParser $envParser;
@@ -22,10 +21,10 @@ final readonly class Executor
 
     public function __construct(object $object)
     {
-        $this->currentDir = new CurrentDirectory();
-        $this->program = new ProgramReflector($object, $this->currentDir);
+        $currentDir = new CurrentDirectory();
+        $this->program = new ProgramReflector($object, $currentDir);
         $this->optionParser = new OptionParser();
-        $this->envParser = new EnvParser($this->currentDir);
+        $this->envParser = new EnvParser($currentDir);
     }
 
     /**
@@ -140,23 +139,23 @@ final readonly class Executor
         #     ];
         #
 
-        $envArrayOptions = [];
+        $envValues = [];
+        $envArrayPrefixes = [];
         $envArrayValues = [];
 
         foreach ($this->options as $option) {
             if (is_string($option->env)) {
-                $prefix = $option->env;
-                $envArrayOptions[$prefix] = $option;
+                $envArrayPrefixes[] = $option->env;
             }
         }
 
         foreach ($this->envIterator() as $key => $value) {
             $name = Naming::camelCase($key);
             if (isset($this->options[$name]) && $this->options[$name]->env === true) {
-                $this->program->setOptionValue($this->options[$name], $value);
+                $envValues[$name] = $value;
                 continue;
             }
-            foreach ($envArrayOptions as $prefix => $option) {
+            foreach ($envArrayPrefixes as $prefix) {
                 if (str_starts_with($key, $prefix)) {
                     $subKey = substr($key, strlen($prefix));
                     $subKey = Naming::camelCase($subKey);
@@ -166,8 +165,12 @@ final readonly class Executor
             }
         }
 
-        foreach ($envArrayValues as $prefix => $values) {
-            $this->program->setOptionValue($envArrayOptions[$prefix], $values);
+        foreach ($this->options as $option) {
+            if (is_string($option->env) && isset($envArrayValues[$option->env])) {
+                $this->program->setOptionValue($option, $envArrayValues[$option->env]);
+            } else if ($option->env === true && isset($envValues[$option->name])) {
+                $this->program->setOptionValue($option, $envValues[$option->name]);
+            }
         }
     }
 
