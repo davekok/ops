@@ -29,16 +29,12 @@ final readonly class Repository
             }
             $data["tags"][] = ["name" => $tag, "version" => $this->getTag($tag) ?? null];
         }
-        usort($data["versions"], static function($versionA, $versionB): int {
-            $a = explode(".", $versionA);
-            $b = explode(".", $versionB);
-            return ((int)$b[0] << 43 | (int)$b[1] << 22 | (int)$b[2]) - ((int)$a[0] << 43 | (int)$a[1] << 22 | (int)$a[2]);
-        });
+        usort($data["versions"], fn(string $versionA, string $versionB): int => $this->encodeVersion($versionA) - $this->encodeVersion($versionB));
 
         return $data;
     }
 
-    public function get(string $tag, bool $verbose = false): string
+    public function get(string $tag, bool $verbose = false): string|array
     {
         if (!$verbose) {
             return $this->getTag($tag) ?? throw new LogicException("no version set for tag: $tag");
@@ -146,5 +142,12 @@ final readonly class Repository
     public function __toString(): string
     {
         return $this->name;
+    }
+
+    private function encodeVersion(string $version): int
+    {
+        [$major, $minor, $patch] = explode(".", $version);
+
+        return (int)$major << 43 | (int)$minor << 22 | (int)$patch;
     }
 }

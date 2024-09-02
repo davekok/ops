@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Operations;
 
+use LogicException;
 use ReflectionClass;
 use ReflectionException;
 use ReflectionMethod;
@@ -31,6 +32,22 @@ final readonly class ProgramReflector
             assert($command instanceof Command);
             $command->setName($method->name);
             $command->setOrder($order++);
+
+            $parameters = $method->getParameters();
+            $countParameters = count($parameters);
+
+            if ($countParameters > 1) {
+                throw new LogicException("A command method should not have more than one parameter.");
+            }
+
+            if ($countParameters === 0) {
+                $command->setArgument(Command::NO_ARGUMENT);
+                yield $command;
+                continue;
+            }
+
+            [$parameter] = $parameters;
+            $command->setArgument($parameter->isDefaultValueAvailable() ? Command::OPTIONAL_ARGUMENT : Command::REQUIRED_ARGUMENT);
             yield $command;
         }
     }
@@ -116,9 +133,13 @@ final readonly class ProgramReflector
     /**
      * @throws ReflectionException
      */
-    public function invoke(string $method): void
+    public function invoke(Command $command, mixed $value): void
     {
-        $this->class->getMethod($method)->invoke($this->object);
+        if ($command->argument === Command::NO_ARGUMENT) {
+            $this->class->getMethod($command->name)->invoke($this->object);
+        } else {
+            $this->class->getMethod($command->name)->invoke($this->object, $value);
+        }
     }
 
     /**
@@ -127,7 +148,7 @@ final readonly class ProgramReflector
     private function validate(Option $option, string $value): string
     {
         if (isset($option->values)) {
-            $values = match(true) {
+            $values = match (true) {
                 is_array($option->values) => $option->values,
                 str_starts_with($option->values, "%option:") => $this->class->getProperty(substr($option->values, 8))->getValue($this->object),
                 str_starts_with($option->values, "%method:") => $this->class->getMethod(substr($option->values, 8))->invoke($this->object),
@@ -139,7 +160,7 @@ final readonly class ProgramReflector
         }
 
         if (isset($option->pattern)) {
-            $pattern = match(true) {
+            $pattern = match (true) {
                 str_starts_with($option->pattern, "%option:") => $this->class->getProperty(substr($option->pattern, 8))->getValue($this->object),
                 str_starts_with($option->pattern, "%method:") => $this->class->getMethod(substr($option->pattern, 8))->invoke($this->object),
                 default => $option->pattern,
@@ -150,7 +171,7 @@ final readonly class ProgramReflector
         }
 
         if (isset($option->filePattern)) {
-            $filePattern = match(true) {
+            $filePattern = match (true) {
                 str_starts_with($option->filePattern, "%option:") => $this->class->getProperty(substr($option->filePattern, 8))->getValue($this->object),
                 str_starts_with($option->filePattern, "%method:") => $this->class->getMethod(substr($option->filePattern, 8))->invoke($this->object),
                 default => $option->filePattern,

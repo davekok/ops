@@ -27,6 +27,7 @@ final class OptionParser
         }
 
         if ($long !== null) {
+            $long = Naming::kebabCase($long);
             if (isset($this->index[$long])) {
                 throw new RuntimeException("Option $long already exists.");
             }

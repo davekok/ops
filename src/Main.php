@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace Operations;
 
 use JsonException;
+use LogicException;
 use RuntimeException;
 use Throwable;
 
 class Main
 {
     #[Option("C", "change current directory")] public CurrentDirectory $currentDir;
-    #[Option("c", "command")] public string $command;
     #[Option("i", "specify the image", filePattern: "etc/%.containerfile")] public string $image;
+    #[Option("f", "force")] public bool $force = false;
     #[Option("k", "the kustomization to use", env: true, filePattern: "etc/%/kustomization.yaml")] public string $kustomization;
     #[Option("m", "increase the major version component when building")] public bool $major = false;
     #[Option("P", "the container registry password to use", env: true)] public string $password;
@@ -24,7 +25,9 @@ class Main
     #[Option("W", "specify the wait time for the watch command", env: true)] public int $wait = 5;
     #[Option("v", "specify the version to use", pattern: "%method:getVersionPattern")] public string $version;
     #[Option("V", "print verbose output")] public bool $verbose = false;
-    #[Option(null, "define a command", env: "CMD_")] public array $commands;
+    #[Option(null, "define checks", env: "CHK_")] public array $checks;
+    #[Option(null, "specify the vendor", env: true)] public string $vendor;
+    #[Option(null, "specify the etcetera dir where your container files and kustomizations are stored", env: true)] public string $etcDir = "etc";
 
     /* Used by option $version */
     public function getVersionPattern(): string
@@ -62,14 +65,14 @@ class Main
         echo "\n";
     }
 
-    #[Command("e", "execute a defined command(s)", "--execute [--command COMMAND]")]
-    public function execute(): void
+    #[Command("c", "run defined checks", "--check [CHECK]")]
+    public function check(string|null $check = null): void
     {
-        $commands = isset($this->command) ? [$this->commands[$this->command]] : $this->commands;
-        foreach ($commands as $command => $commandLine) {
-            $commandLine = str_replace(['${CWD}'], [(string)$this->currentDir], $commandLine);
-            echo "running $command: $commandLine\n";
-            $this->exec($commandLine);
+        $checks = isset($check) ? [$this->checks[$check]] : $this->checks;
+        foreach ($checks as $name => $command) {
+            $command = str_replace(['${CWD}'], [(string)$this->currentDir], $command);
+            echo "check $name: $command\n";
+            $this->exec($command);
             echo "\n";
         }
     }
@@ -77,8 +80,8 @@ class Main
     #[Command("u", "update image tag to ring version in kustomizations", "--update [--ring RING]")]
     public function update(): void
     {
-        $etc = $this->getEtcetera();
-        foreach ($etc->getKustomizations() as $file) {
+        $wc = $this->getWorkingCopy();
+        foreach ($wc->getKustomizations() as $file) {
             $yaml = yaml_parse_file($file);
 
             if (!isset($yaml["images"])) {
@@ -99,7 +102,7 @@ class Main
             }
             unset($image);
 
-            echo "Updating ", str_replace("$etc/", "", $file), ":\n - ", implode("\n - ", $images), "\n\n";
+            echo "Updating ", str_replace("$wc/", "", $file), ":\n - ", implode("\n - ", $images), "\n\n";
 
             yaml_emit_file($file, $yaml, encoding: YAML_UTF8_ENCODING, linebreak: YAML_LN_BREAK);
         }
@@ -108,24 +111,89 @@ class Main
     #[Command("b", "build a new version of a image", "--build [--ring RING] [ --image IMAGE [--major] [--version VERSION] ]")]
     public function build(): void
     {
-        foreach ($this->getEtcetera()->getImages($this->image ?? null) as $image) {
+        $workingDir = $this->getWorkingCopy();
+
+        $images = $this->getImages();
+        foreach ($images as $image) {
+            $image->setLabelsFromMetaData($this->getRepository($image)->get($this->ring));
+            $revisionHash = $workingDir->calculateRevisionHash($image);
+
             if ($image->requiresUpdate) {
                 $this->update();
+            } else if (!$this->shouldBuild($image, $images, $revisionHash)) {
+                echo "Skipping $image, no change detected\n";
+                continue;
             }
-            $repository = $image->getRepository();
-            $currentVersion = $repository->getTag($this->ring);
-            $targetVersion = $repository->bumpVersion($currentVersion, $this->major ? null : $this->getRing(1));
+
+            $repository = $this->getRepository($image);
             echo "Building $image\n";
             echo " - ring: $this->ring\n";
+            $currentVersion = $image->getVersion();
             echo " - current version: $currentVersion\n";
+            $targetVersion = $repository->bumpVersion($currentVersion, $this->major ? null : $this->getRing(1));
             echo " - target version: $targetVersion\n";
-            $this->exec("buildah bud --build-arg 'RING=$this->ring' --build-arg 'VERSION=$targetVersion' -f '$image->containerFile' -t '$repository:$targetVersion' $this->currentDir");
+
+            # Update labels of image
+            $image->setVersion($targetVersion);
+            if ($image->rootImage) {
+                # Add all images as dependency of the root image
+                foreach ($images as $dependentImage) {
+                    $dependentVersion = $dependentImage->getVersion();
+                    echo " - dependent $dependentImage->name version: $dependentVersion\n";
+                    $image->setDependencyVersion($dependentImage->name, $dependentVersion);
+                }
+            } else {
+                foreach ($image->dependencies as $dependency) {
+                    $dependentVersion = $images[$dependency]->getVersion();
+                    echo " - dependent $dependency version: $dependentVersion\n";
+                    $image->setDependencyVersion($dependency, $dependentVersion);
+                }
+            }
+            echo " - revision hash: $revisionHash\n";
+            $image->setRevisionHash($revisionHash);
+
+            $command = [
+                "buildah", "bud",
+                "--build-arg", "'RING=$this->ring'",
+                "-f", "'$image->containerFile'",
+                "-t", "'$repository:$targetVersion'",
+            ];
+            foreach ($image->getLabels() as $key => $value) {
+                echo " - label $key: $value\n";
+                $command[] = "--label";
+                $command[] = "'$key=$value'";
+            }
+            $command[] = "$this->currentDir";
+            $command = implode(" ", $command);
+            echo "$command\n";
+            $this->exec($command);
+
             $this->exec("buildah tag '$repository:$targetVersion' '$repository:$this->ring'");
             echo "Pushing $repository:$targetVersion\n";
             $this->exec("buildah push '$repository:$targetVersion'");
             $this->exec("buildah push '$repository:$this->ring'");
             echo "\n";
         }
+    }
+
+    private function shouldBuild(Image $image, array $images, string $revisionHash): bool
+    {
+        if ($this->force) {
+            return true;
+        }
+
+        if ($image->getRevisionHash() !== $revisionHash) {
+            return true;
+        }
+
+        // check if version of dependency matches metadata of image
+        foreach ($image->dependencies as $dependency) {
+            if ($image->getDependencyVersion($dependency) !== $images[$dependency]->getVersion()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     #[Command("s", "shift ring to next ring", "--shift --ring RING [--image IMAGE]")]
@@ -142,10 +210,15 @@ class Main
 
     private function shiftRing(int $direction): void
     {
+        if (isset($this->image) && $this->ring !== "ante") {
+            throw new LogicException("Shifting a single image is only allowed for the ante ring.");
+        }
         $target = $this->getRing($direction);
 
-        foreach ($this->getEtcetera()->getImages($this->image ?? null) as $image) {
-            $repository = $image->getRepository();
+        $images = $this->getWorkingCopy()->getImages();
+        $rootImage = $images[array_key_last($images)];
+        foreach ($rootImage->getDependencies() as $dependency) {
+            $repository = $this->getRepository($dependency);
             $version = $repository->getTag($this->ring);
             if ($version !== null) {
                 $repository->setTag($target, $version);
@@ -158,8 +231,8 @@ class Main
     {
         $data = [];
 
-        foreach ($this->getEtcetera()->getImages($this->image ?? null) as $image) {
-            $repository = $image->getRepository();
+        foreach ($this->getImages() as $image) {
+            $repository = $this->getRepository($image);
             $data[$repository->name] = $repository->list();
         }
 
@@ -171,8 +244,8 @@ class Main
     {
         $data = [];
         $tag = $this->version ?? $this->ring;
-        foreach ($this->getEtcetera()->getImages($this->image ?? null) as $image) {
-            $repository = $image->getRepository();
+        foreach ($this->getImages() as $image) {
+            $repository = $this->getRepository($image);
             $data[$repository->name] = $repository->get($tag, $this->verbose);
         }
 
@@ -182,7 +255,7 @@ class Main
     #[Command("d", "deploy application", "--deploy --ring RING --kustomization KUSTOMIZATION")]
     public function deploy(): void
     {
-        $repo = $this->getEtcetera()->getImage("deploy")->getRepository();
+        $repo = $this->getRepository($this->getWorkingCopy()->getImages()["deploy"]);
 
         echo "Check deploy ", date("Y-m-d H:i:s"), "\n";
         # Get current version
@@ -231,9 +304,24 @@ class Main
         } while ($this->wait > 0);
     }
 
-    private function getEtcetera(): Etcetera
+    private function getWorkingCopy(): WorkingCopy
     {
-        return new Etcetera($this->currentDir, $this->registry, $this->project);
+        return new WorkingCopy($this->currentDir, new ContainerFileParser($this->registry, $this->project), $this->etcDir);
+    }
+
+    private function getRepository(Image $image): Repository
+    {
+        return new Repository("$image->registry/$image->project/$image->name");
+    }
+
+    private function getImages(): array
+    {
+        $images = $this->getWorkingCopy()->getImages();
+        if (isset($this->image)) {
+            return [$images[$this->image]];
+        }
+
+        return $images;
     }
 
     private function getRing(int $offset = 0): string

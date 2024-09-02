@@ -13,9 +13,6 @@ final readonly class Executor
     private OptionParser $optionParser;
     private EnvParser $envParser;
 
-    /** @var array<string,Command> */
-    private array $commands;
-
     /** @var array<string,Option> */
     private array $options;
 
@@ -27,33 +24,31 @@ final readonly class Executor
         $this->envParser = new EnvParser($currentDir);
     }
 
-    /**
-     * @throws ReflectionException
-     */
+    /** @throws ReflectionException */
     public function execute(): void
     {
-        $this->commands = $this->getCommands();
         $this->options = $this->getOptions();
+        $help = new Help($this->getCommands(), $this->options);
         $this->parseEnv();
 
         try {
-            $methods = $this->parseOptions();
+            $commands = $this->parseOptions();
         } catch (Throwable $throwable) {
-            $this->help($throwable);
+            echo $help->error($throwable);
             return;
         }
 
-        if (count($methods) === 0) {
-            $this->help();
+        if (count($commands) === 0) {
+            echo $help;
             return;
         }
 
-        foreach ($methods as $method) {
-            if ($method === "help") {
-                $this->help();
+        foreach ($commands as [$command, $value]) {
+            if ($command->name === "help") {
+                echo $help;
                 continue;
             }
-            $this->program->invoke($method);
+            $this->program->invoke($command, $value);
         }
     }
 
@@ -62,7 +57,13 @@ final readonly class Executor
         $commands = [];
 
         foreach ($this->program->getCommands() as $command) {
-            $this->optionParser->addOption($command->short, $command->name, $command, true);
+            $this->optionParser->addOption(
+                short: $command->short,
+                long: $command->name,
+                option: $command,
+                flag: $command->argument === Command::NO_ARGUMENT,
+                optional: $command->argument === Command::OPTIONAL_ARGUMENT
+            );
             $commands[$command->name] = $command;
         }
 
@@ -101,7 +102,7 @@ final readonly class Executor
                 continue;
             }
             if ($commandOrOption instanceof Command) {
-                $methods[$commandOrOption->order] = $commandOrOption->name;
+                $methods[$commandOrOption->order] = [$commandOrOption, $value];
             }
         }
 
@@ -128,8 +129,8 @@ final readonly class Executor
         #
         # Example:
         #
-        #     CMD_ANALYZE="phstan analyze ."
-        #     CMD_TEST="phpunit ./tests"
+        #     CHCK_ANALYZE="phstan analyze ."
+        #     CHCK_TEST="phpunit ./tests"
         #
         # Becomes:
         #
@@ -172,77 +173,5 @@ final readonly class Executor
                 $this->program->setOptionValue($option, $envValues[$option->name]);
             }
         }
-    }
-
-    private function help(Throwable|null $throwable = null): void
-    {
-        $usages = [];
-        $commands = [];
-        $options = [];
-        $envs = [];
-        $maxLengthDesc = 0;
-
-        foreach ($this->commands as $command) {
-            $usages[] = $command->usage;
-            $desc = "  -$command->short,--$command->name";
-            $length = strlen($desc);
-            if ($length > $maxLengthDesc) {
-                $maxLengthDesc = $length;
-            }
-            $commands[] = [$desc, $command->help ?? ""];
-        }
-
-        foreach ($this->options as $option) {
-            $desc = match (true) {
-                $option->short !== null => "  -$option->short,--$option->name",
-                default => "  --$option->name",
-            };
-            if (!$option->flag) {
-                $desc .= " " . Naming::screamingSnakeCase($option->name);
-            }
-            $length = strlen($desc);
-            if ($length > $maxLengthDesc) {
-                $maxLengthDesc = $length;
-            }
-            $options[] = [$desc, $option->help ?? ""];
-
-            if (!$option->env) {
-                continue;
-            }
-            $desc = "  " . Naming::screamingSnakeCase($option->name);
-            $length = strlen($desc);
-            if ($length > $maxLengthDesc) {
-                $maxLengthDesc = $length;
-            }
-            $envs[] = [$desc, $option->help ?? ""];
-        }
-
-        $maxLengthDesc += 3;
-
-        if ($throwable !== null) {
-            echo "Error: {$throwable->getMessage()}\n## {$throwable->getFile()}({$throwable->getLine()})\n{$throwable->getTraceAsString()}\n";
-        }
-        $script = basename($_SERVER["SCRIPT_NAME"]);
-        $pre = "Usage:";
-        foreach ($usages as $usage) {
-            echo "$pre $script $usage\n";
-            $pre = "     |";
-        }
-        echo "\n";
-        echo "Commands:\n";
-        foreach ($commands as [$desc, $help]) {
-            echo $desc . str_pad(" ", $maxLengthDesc - strlen($desc)) . $help . "\n";
-        }
-        echo "\n";
-        echo "Options:\n";
-        foreach ($options as [$desc, $help]) {
-            echo $desc . str_pad(" ", $maxLengthDesc - strlen($desc)) . $help . "\n";
-        }
-        echo "\n";
-        echo "Environment variables:\n";
-        foreach ($envs as [$desc, $help]) {
-            echo $desc . str_pad(" ", $maxLengthDesc - strlen($desc)) . $help . "\n";
-        }
-        echo "\n";
     }
 }
