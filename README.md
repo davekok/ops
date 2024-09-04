@@ -8,7 +8,7 @@ The goal of this application is to make it easier to do GitOps. The corner stone
 of GitOps are state [reconciliation](https://github.com/open-gitops/documents/blob/v1.0.0/GLOSSARY.md#reconciliation)
 and immutably storing versioned artifacts in a [state store](https://github.com/open-gitops/documents/blob/v1.0.0/GLOSSARY.md#state-store).
 
-Since reconciliation is already handled by Kubernetes. This application simply make the appropriate calls to Kubernetes.
+Since reconciliation is already handled by Kubernetes. This application simply makes the appropriate calls to Kubernetes.
 
 However, building artifacts in an immutable versioned matter is not handled out of the box by any
 tool I know of. Thus, this application focuses primarily on that aspect.
@@ -18,15 +18,18 @@ tool I know of. Thus, this application focuses primarily on that aspect.
 ### State store
 
 In GitOps you are free to choose the [state store](https://github.com/open-gitops/documents/blob/v1.0.0/GLOSSARY.md#state-store)
-that best fits your projects needs. Since we will be using Kubernetes and Kubernetes interfaces with the
-container registry rather git. A private container registry is used as the state store.
+that best fits your projects needs. Since we will be using Kubernetes and Kubernetes interfaces with
+container registries rather git. A private container registry is used as the state store.
 
 ### Root image
 
 This implementation requires that you have one container image that is the root image of the project.
-It is assumed that once this root image is run on the site. Everything is handled from there. The
-root image could for instance contain the Kubernetes files and database migrations to install the
-application.
+It is assumed that once this root image is run on a site. Everything is handled from there. The
+root image could, for instance, contain the Kubernetes files and database migrations to install, upgrade or
+downgrade the application. This complies with the constraint that
+[admin processes](https://12factor.net/admin-processes) should one-offs.
+
+On the root image, labels are added, to record the versions of all dependent container images.
 
 ### Environments
 

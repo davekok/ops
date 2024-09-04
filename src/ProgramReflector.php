@@ -10,6 +10,7 @@ use ReflectionException;
 use ReflectionMethod;
 use ReflectionNamedType;
 use RuntimeException;
+use function str_starts_with;
 
 final readonly class ProgramReflector
 {
@@ -87,46 +88,49 @@ final readonly class ProgramReflector
             case "bool":
                 if ($option->flag) {
                     $property->setValue($this->object, true);
-                    break;
+                    return;
                 }
                 $property->setValue($this->object, match ($value) {
                     "true", "1" => true,
                     "false", "0" => false,
                     default => throw new RuntimeException("invalid value for $property->name"),
                 });
-                break;
+                return;
 
             case "int":
                 if (preg_match('/^0|[1-9][0-9]*$/', $value) !== 1) {
                     throw new RuntimeException("invalid value for $property->name");
                 }
                 $property->setValue($this->object, (int)$value);
-                break;
+                return;
 
             case "float":
                 if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/', $value) !== 1) {
                     throw new RuntimeException("invalid value for $property->name");
                 }
                 $property->setValue($this->object, (float)$value);
-                break;
+                return;
 
             case "string":
                 $property->setValue($this->object, $this->validate($option, $value));
-                break;
+                return;
 
             case "array":
                 if (is_string($value)) {
                     $value = explode(",", $value);
                 }
+                if ($option->morph !== null && str_starts_with($option->morph, "%method:")) {
+                    $value = $this->class->getMethod(substr($option->morph, 8))->invoke($this->object, $value);
+                }
                 foreach ($value as $v) {
                     $this->validate($option, $v);
                 }
                 $property->setValue($this->object, $value);
-                break;
+                return;
 
             case CurrentDirectory::class:
                 $this->currentDir->set($value);
-                break;
+                return;
         }
     }
 

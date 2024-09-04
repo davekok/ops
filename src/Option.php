@@ -23,6 +23,7 @@ final readonly class Option
         public string|null $pattern = null,
         public string|null $filePattern = null,
         public string|null $valueName = null,
+        public string|null $morph = null,
     ) {}
 
     public function setName(string $name): void

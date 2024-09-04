@@ -19,7 +19,7 @@ class Main
     #[Option("P", "the container registry password to use", env: true)] public string $password;
     #[Option("p", "the project", env: true, pattern: "/^([a-z0-9-]+\/)*[a-z0-9-]+$/")] public string $project;
     #[Option("R", "the container registry to use", env: true)] public string $registry;
-    #[Option(null, "specify the rings", env: true, pattern: "/^[a-z]+$/")] public array $rings;
+    #[Option(null, "specify the rings", env: true, pattern: "/^[a-z]+$/", morph: "%method:morphRings")] public array $rings;
     #[Option("r", "the ring to use", env: true, values: "%option:rings")] public string $ring;
     #[Option("U", "the container registry user to use", env: true)] public string $user;
     #[Option("W", "specify the wait time for the watch command", env: true)] public int $wait = 5;
@@ -28,6 +28,12 @@ class Main
     #[Option(null, "define checks", env: "CHK_")] public array $checks;
     #[Option(null, "specify the vendor", env: true)] public string $vendor;
     #[Option(null, "specify the etcetera dir where your container files and kustomizations are stored", env: true)] public string $etcDir = "etc";
+
+    /* Used by option $rings */
+    public function morphRings(array $rings): array
+    {
+        return ["ante", ...$rings, "post"];
+    }
 
     /* Used by option $version */
     public function getVersionPattern(): string
