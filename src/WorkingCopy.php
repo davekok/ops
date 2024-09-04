@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Operations;
+namespace GitOps;
 
 use LogicException;
 use RuntimeException;

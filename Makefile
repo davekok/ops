@@ -1,13 +1,13 @@
-CONREG=ghcr.io
+CONREG=gitlab.true.nl
 
 .PHONY: all
 all: package install
 
 .PHONY: package
-package: ops.tar.gz
+package: gitops.tar.gz
 
 .PHONY: install
-install: /usr/local/bin/ops
+install: /usr/local/bin/gitops
 
 .PHONY: login
 login:
@@ -15,19 +15,19 @@ login:
 
 .PHONY: build
 build:
-	buildah bud -t ${CONREG}/davekok/ops:1.0.0 -f ops.containerfile .
+	buildah bud -t ${CONREG}/davekok/gitops:1.0.0 -f gitops.containerfile .
 
 .PHONY: push
 push:
-	buildah push ${CONREG}/davekok/ops:1.0.0
+	buildah push ${CONREG}/davekok/gitops:1.0.0
 
-/usr/local/bin/ops: ops
+/usr/local/bin/gitops: gitops
 	sudo install -o root -g root -m 755 -T $< $@
 
-ops: $(wildcard src/*.php)
-	phar pack -c gz -f $@.phar -a 'ops' -s stub.php $^
+gitops: $(wildcard src/*.php)
+	phar pack -c gz -f $@.phar -a 'gitops' -s stub.php $^
 	mv $@.phar $@
 	chmod +x $@
 
-ops.tar.gz: ops
-	tar -czf $@ ops
+gitops.tar.gz: gitops
+	tar -czf $@ gitops
