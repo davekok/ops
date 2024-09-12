@@ -25,6 +25,7 @@ class Image
         public readonly array $sources,
         public readonly bool $rootImage,
         public readonly bool $requiresUpdate,
+        public readonly array $checks,
     ) {}
 
     public function setLabelsFromMetaData(array $metaData): void

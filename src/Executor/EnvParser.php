@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace GitOps;
+namespace GitOps\Executor;
 
 final readonly class EnvParser
 {

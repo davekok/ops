@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace GitOps;
+namespace GitOps\Executor;
 
 use Attribute;
 
@@ -15,7 +15,6 @@ final readonly class Command
 
     public string $name;
     public int $order;
-    public int $argument;
 
     public function __construct(
         public string $short,
@@ -31,10 +30,5 @@ final readonly class Command
     public function setOrder(int $order): void
     {
         $this->order = $order;
-    }
-
-    public function setArgument(int $argument): void
-    {
-        $this->argument = $argument;
     }
 }

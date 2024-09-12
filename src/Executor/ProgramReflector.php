@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace GitOps;
+namespace GitOps\Executor;
 
 use LogicException;
 use ReflectionClass;
@@ -34,21 +34,10 @@ final readonly class ProgramReflector
             $command->setName($method->name);
             $command->setOrder($order++);
 
-            $parameters = $method->getParameters();
-            $countParameters = count($parameters);
-
-            if ($countParameters > 1) {
-                throw new LogicException("A command method should not have more than one parameter.");
+            if (count($method->getParameters()) > 0) {
+                throw new LogicException("A command method should not have parameters.");
             }
 
-            if ($countParameters === 0) {
-                $command->setArgument(Command::NO_ARGUMENT);
-                yield $command;
-                continue;
-            }
-
-            [$parameter] = $parameters;
-            $command->setArgument($parameter->isDefaultValueAvailable() ? Command::OPTIONAL_ARGUMENT : Command::REQUIRED_ARGUMENT);
             yield $command;
         }
     }
@@ -137,13 +126,9 @@ final readonly class ProgramReflector
     /**
      * @throws ReflectionException
      */
-    public function invoke(Command $command, mixed $value): void
+    public function invoke(Command $command): void
     {
-        if ($command->argument === Command::NO_ARGUMENT) {
-            $this->class->getMethod($command->name)->invoke($this->object);
-        } else {
-            $this->class->getMethod($command->name)->invoke($this->object, $value);
-        }
+        $this->class->getMethod($command->name)->invoke($this->object);
     }
 
     /**

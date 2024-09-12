@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GitOps;
 
+use GitOps\Executor\CurrentDirectory;
 use LogicException;
 use RuntimeException;
 

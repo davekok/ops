@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace GitOps;
+namespace GitOps\Executor;
 
 use ReflectionException;
 use Throwable;
@@ -43,12 +43,12 @@ final readonly class Executor
             return;
         }
 
-        foreach ($commands as [$command, $value]) {
+        foreach ($commands as $command) {
             if ($command->name === "help") {
                 echo $help;
                 continue;
             }
-            $this->program->invoke($command, $value);
+            $this->program->invoke($command);
         }
     }
 
@@ -102,7 +102,7 @@ final readonly class Executor
                 continue;
             }
             if ($commandOrOption instanceof Command) {
-                $methods[$commandOrOption->order] = [$commandOrOption, $value];
+                $methods[$commandOrOption->order] = $commandOrOption;
             }
         }
 

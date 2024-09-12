@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace GitOps;
 
+use GitOps\Executor\Command;
+use GitOps\Executor\CurrentDirectory;
+use GitOps\Executor\Option;
 use JsonException;
 use LogicException;
 use RuntimeException;
 use Throwable;
+use function array_key_first;
 
 class Main
 {
@@ -25,7 +29,6 @@ class Main
     #[Option("W", "specify the wait time for the watch command", env: true)] public int $wait = 5;
     #[Option("v", "specify the version to use", pattern: "%method:getVersionPattern")] public string $version;
     #[Option("V", "print verbose output")] public bool $verbose = false;
-    #[Option(null, "define checks", env: "CHK_")] public array $checks;
     #[Option(null, "specify the vendor", env: true)] public string $vendor;
     #[Option(null, "specify the etcetera dir where your container files and kustomizations are stored", env: true)] public string $etcDir = "etc";
 
@@ -47,12 +50,11 @@ class Main
     {
         $regSecret = "/run/secrets/registry-secret";
         if (file_exists($regSecret)) {
-            $registry = json_decode(file_get_contents($regSecret) ?: throw new RuntimeException($regSecret), false, 512, JSON_THROW_ON_ERROR);
-            foreach ($registry->auths as $registry => $auth) {
-                $user = $auth->username;
-                $password = $auth->password;
-                break;
-            }
+            $auths = json_decode(file_get_contents($regSecret) ?: throw new RuntimeException($regSecret), false, 512, JSON_THROW_ON_ERROR);
+            $registry = array_key_first($auths->auths);
+            $auth = $auths->auths[$registry];
+            $user = $auth->username;
+            $password = $auth->password;
         } else {
             $registry = $this->registry;
             $user = $this->user ?? null;
@@ -71,13 +73,24 @@ class Main
         echo "\n";
     }
 
-    #[Command("c", "run defined checks", "--check [CHECK]")]
-    public function check(string|null $check = null): void
+    #[Command("c", "run checks for image", "--check --image IMAGE")]
+    public function check(): void
     {
-        $checks = isset($check) ? [$this->checks[$check]] : $this->checks;
-        foreach ($checks as $name => $command) {
-            $command = str_replace(['${CWD}'], [(string)$this->currentDir], $command);
-            echo "check $name: $command\n";
+        $images = $this->getImages();
+        foreach ($images as $image) {
+            $this->runChecks($image);
+        }
+    }
+
+    private function runChecks(Image $image): void
+    {
+        if (count($image->checks) === 0) {
+            return;
+        }
+        echo "Checking:\n";
+        foreach ($image->checks as $name => $check) {
+            $command = str_replace(['${CWD}'], [(string)$this->currentDir], $check);
+            echo "- $name: $command\n";
             $this->exec($command);
             echo "\n";
         }
@@ -131,6 +144,8 @@ class Main
                 continue;
             }
 
+            $this->runChecks($image);
+
             $repository = $this->getRepository($image);
             echo "Building $image\n";
             echo " - ring: $this->ring\n";
@@ -169,10 +184,10 @@ class Main
                 $command[] = "--label";
                 $command[] = "'$key=$value'";
             }
-            $command[] = "$this->currentDir";
-            $command = implode(" ", $command);
-            echo "$command\n";
-            $this->exec($command);
+            $command[] = (string)$this->currentDir;
+            $commandLine = implode(" ", $command);
+            echo "$commandLine\n";
+            $this->exec($commandLine);
 
             $this->exec("buildah tag '$repository:$targetVersion' '$repository:$this->ring'");
             echo "Pushing $repository:$targetVersion\n";
