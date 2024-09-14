@@ -120,6 +120,15 @@ final readonly class ProgramReflector
             case CurrentDirectory::class:
                 $this->currentDir->set($value);
                 return;
+
+            default:
+                $class = new ReflectionClass($option->type);
+                if ($class->isEnum()) {
+                    $property->setValue($this->object, $class->getMethod("from")->invoke(null, $value));
+                    return;
+                }
+
+                $property->setValue($this->object, $class->newInstance($value));
         }
     }
 

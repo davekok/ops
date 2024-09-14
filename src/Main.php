@@ -12,6 +12,9 @@ use LogicException;
 use RuntimeException;
 use Throwable;
 use function array_key_first;
+use function base64_decode;
+use function file_put_contents;
+use const JSON_UNESCAPED_UNICODE;
 
 class Main
 {
@@ -20,16 +23,16 @@ class Main
     #[Option("f", "force")] public bool $force = false;
     #[Option("k", "the kustomization to use", env: true, filePattern: "etc/%/kustomization.yaml")] public string $kustomization;
     #[Option("m", "increase the major version component when building")] public bool $major = false;
-    #[Option("P", "the container registry password to use", env: true)] public string $password;
+    #[Option("P", "the container registry password to use")] public string $password;
     #[Option("p", "the project", env: true, pattern: "/^([a-z0-9-]+\/)*[a-z0-9-]+$/")] public string $project;
-    #[Option("R", "the container registry to use", env: true)] public string $registry;
+    #[Option("R", "the container registry to use")] public string $registry;
     #[Option(null, "specify the rings", env: true, pattern: "/^[a-z]+$/", morph: "%method:morphRings")] public array $rings;
     #[Option("r", "the ring to use", env: true, values: "%option:rings")] public string $ring;
-    #[Option("U", "the container registry user to use", env: true)] public string $user;
+    #[Option("U", "the container registry user to use")] public string $user;
     #[Option("W", "specify the wait time for the watch command", env: true)] public int $wait = 5;
     #[Option("v", "specify the version to use", pattern: "%method:getVersionPattern")] public string $version;
     #[Option("V", "print verbose output")] public bool $verbose = false;
-    #[Option(null, "specify the vendor", env: true)] public string $vendor;
+    #[Option(null, "save the secret")] public bool $saveSecret = false;
     #[Option(null, "specify the etcetera dir where your container files and kustomizations are stored", env: true)] public string $etcDir = "etc";
 
     /* Used by option $rings */
@@ -45,32 +48,48 @@ class Main
     }
 
     /** @throws JsonException */
-    #[Command("L", "login to container registry", "--login [--registry REGISTRY] [--user USER] [--password PASSWORD]")]
+    #[Command("L", "login to container registry", "--login [--registry REGISTRY] [--user USER] [--password PASSWORD] [--save-secret]")]
     public function login(): void
     {
-        $regSecret = "/run/secrets/registry-secret";
-        if (file_exists($regSecret)) {
-            $auths = json_decode(file_get_contents($regSecret) ?: throw new RuntimeException($regSecret), false, 512, JSON_THROW_ON_ERROR);
-            $registry = array_key_first($auths->auths);
-            $auth = $auths->auths[$registry];
-            $user = $auth->username;
-            $password = $auth->password;
-        } else {
-            $registry = $this->registry;
-            $user = $this->user ?? null;
-            $password = $this->password ?? null;
+        if (! isset($this->registry, $this->user, $this->password)) {
+            foreach (LocationLevel::cases() as $location) {
+                $path = $location->path((string)$this->currentDir);
+                if (file_exists($path)) {
+                    $auths = json_decode(file_get_contents($path) ?: throw new RuntimeException($path), false, 512, JSON_THROW_ON_ERROR);
+                    $this->registry = array_key_first($auths->auths);
+                    [$this->user, $this->password] = explode(":", base64_decode($auths->auths[$this->registry]->auth));
+                }
+            }
         }
-
-        if (! isset($user, $password)) {
-            return;
+        if (! isset($this->registry, $this->user, $this->password)) {
+            throw new LogicException("Please specify a valid container registry, username and password.");
         }
 
         echo "Logging in\n";
         echo "- buildah: ";
-        $this->exec("buildah login -u '$user' -p '$password' '$registry'");
+        $this->exec("buildah login -u '$this->user' -p '$this->password' '$this->registry'");
         echo "- skopeo: ";
-        $this->exec("skopeo login -u '$user' -p '$password' '$registry'");
+        $this->exec("skopeo login -u '$this->user' -p '$this->password' '$this->registry'");
         echo "\n";
+
+        if (!$this->saveSecret) {
+            return;
+        }
+
+        $registrySecret = [
+            "auths" => [
+                $this->registry => [
+                    "username" => $this->user,
+                    "password" => $this->password,
+                    "auth" => base64_encode("$this->user:$this->password"),
+                ]
+            ]
+        ];
+
+        file_put_contents(
+            LocationLevel::PROJECT->path((string)$this->currentDir),
+            json_encode($registrySecret, flags: JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+        );
     }
 
     #[Command("c", "run checks for image", "--check --image IMAGE")]
