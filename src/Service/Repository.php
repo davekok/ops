@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace GitOps;
+namespace GitOps\Service;
 
 use JsonException;
 use LogicException;

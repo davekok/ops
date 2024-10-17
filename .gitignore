@@ -1,3 +1,5 @@
-/.idea
 /gitops
 /gitops.tar.gz
+/var
+*.phar
+.*

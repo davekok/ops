@@ -1,0 +1,62 @@
+apiVersion: gitops.davekok.nl/v1alpha1
+kind: GitOps
+metadata:
+  name: php-app
+pathTemplates:
+  pushCredentialsFile: "{root}/.gitops-push-credentials"
+  pullCredentialsFile: "{root}/.gitops-pull-credentials"
+  localSettings: "{root}/.gitops-local"
+  kustomization: "{root}/etc/{environment}/kustomization.yaml"
+  containerFile: "{root}/etc/{image}.containerfile"
+registry:
+  host: "ghcr.io"
+  imageUri: "{host}/davekok/gitops/example/php-app{/name,fork}"
+rings:
+- developers*
+- stakeholders
+- users
+environments:
+- dev
+- test
+- acceptance
+- production
+commonImageLabels:
+  org.opencontainers.image.vendor: davekok.nl
+  org.opencontainers.image.licenses: GPL-3
+images:
+- name: base
+- name: dev
+  checks:
+  - phpunit tests
+- name: deploy
+  requiresUpdate: true
+  isRootImage: true
+sites:
+- name: laptop-davekok
+  namespace: php-app-dev
+  environment: dev
+  ring: developers
+  fork: davekok
+  probeInterval: 5m
+- name: pipeline
+  namespace: php-app-agent
+  environment: test
+  ring: developers
+  fork: main
+  probeInterval: 5m
+- name: test
+  namespace: php-app-test
+  environment: test
+  ring: developers
+  fork: main
+  probeInterval: 5m
+- name: acceptance
+  namespace: php-app-acceptance
+  environment: acceptance
+  ring: stakeholders
+  probeInterval: 5m
+- name: production
+  namespace: php-app-production
+  environment: production
+  ring: users
+  probeInterval: 5m

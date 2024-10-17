@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace GitOps;
 
 use GitOps\Executor\Command;
-use GitOps\Executor\CurrentDirectory;
+use GitOps\Model\WorkingDirectory;
 use GitOps\Executor\Option;
+use GitOps\Model\Image;
+use GitOps\Model\LocationLevel;
+use GitOps\Service\Repository;
 use JsonException;
 use LogicException;
 use RuntimeException;
@@ -16,12 +19,12 @@ use function base64_decode;
 use function file_put_contents;
 use const JSON_UNESCAPED_UNICODE;
 
-class Main
+class MainOld
 {
-    #[Option("C", "change current directory")] public CurrentDirectory $currentDir;
+    #[Option("C", "change current directory")] public WorkingDirectory $currentDir;
     #[Option("i", "specify the image", filePattern: "etc/%.containerfile")] public string $image;
     #[Option("f", "force")] public bool $force = false;
-    #[Option("k", "the kustomization to use", env: true, filePattern: "etc/%/kustomization.yaml")] public string $kustomization;
+    #[Option("e", "the environment to use", env: true, filePattern: "etc/%/kustomization.yaml")] public string $environment;
     #[Option("m", "increase the major version component when building")] public bool $major = false;
     #[Option("P", "the container registry password to use")] public string $password;
     #[Option("p", "the project", env: true, pattern: "/^([a-z0-9-]+\/)*[a-z0-9-]+$/")] public string $project;
@@ -29,9 +32,10 @@ class Main
     #[Option(null, "specify the rings", env: true, pattern: "/^[a-z]+$/", morph: "%method:morphRings")] public array $rings;
     #[Option("r", "the ring to use", env: true, values: "%option:rings")] public string $ring;
     #[Option("U", "the container registry user to use")] public string $user;
-    #[Option("W", "specify the wait time for the watch command", env: true)] public int $wait = 5;
+    #[Option(null, "specify the interval in minutes for the watch command", env: true)] public int $probeInterval = 5;
     #[Option("v", "specify the version to use", pattern: "%method:getVersionPattern")] public string $version;
     #[Option("V", "print verbose output")] public bool $verbose = false;
+    #[Option(null, "specify the site")] public string $site;
     #[Option(null, "save the secret")] public bool $saveSecret = false;
     #[Option(null, "specify the etcetera dir where your container files and kustomizations are stored", env: true)] public string $etcDir = "etc";
 
@@ -45,6 +49,12 @@ class Main
     public function getVersionPattern(): string
     {
         return str_replace("/^", implode("|", $this->rings) . "|", Repository::VERSION_PATTERN);
+    }
+
+    public function default(): void
+    {
+        $this->login();
+        $this->build();
     }
 
     /** @throws JsonException */
@@ -266,7 +276,7 @@ class Main
         }
     }
 
-    #[Command("l", "list all versions of a container", "--list [--image IMAGE]")]
+    #[Command("l", "list all versions of images", "--list [--image IMAGE]")]
     public function list(): void
     {
         $data = [];
@@ -336,17 +346,26 @@ class Main
             try {
                 $this->login();
                 $this->deploy();
-                sleep($this->wait * 60);
+                if ($this->probeInterval === 0) {
+                    return;
+                }
+                sleep($this->probeInterval * 60);
             } catch (Throwable $throwable) {
                 $error = get_class($throwable);
                 echo date("[Y-m-d H:i:s]"), "$error: {$throwable->getMessage()}\n##{$throwable->getFile()}::{$throwable->getLine()}\n{$throwable->getTraceAsString()}\n";
             }
-        } while ($this->wait > 0);
+        } while (true);
     }
 
-    private function getWorkingCopy(): WorkingCopy
+    #[Command(null, "install a site", "--install --site SITE")]
+    public function install(): void
     {
-        return new WorkingCopy($this->currentDir, new ContainerFileParser($this->registry, $this->project), $this->etcDir);
+
+    }
+
+    private function getWorkingCopy(): WorkingDirectory
+    {
+        return new WorkingDirectory($this->currentDir, new ContainerFileParser($this->registry, $this->project), $this->etcDir);
     }
 
     private function getRepository(Image $image): Repository

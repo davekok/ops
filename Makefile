@@ -1,10 +1,7 @@
-CONREG=gitlab.true.nl
+CONREG=ghcr.io
 
 .PHONY: all
-all: package install
-
-.PHONY: package
-package: gitops.tar.gz
+all: install
 
 .PHONY: install
 install: /usr/local/bin/gitops
@@ -21,13 +18,23 @@ build:
 push:
 	buildah push ${CONREG}/davekok/gitops:1.0.0
 
-/usr/local/bin/gitops: gitops
+/usr/local/bin/gitops: bin/gitops.phar
 	sudo install -o root -g root -m 755 -T $< $@
 
-gitops: $(wildcard src/*.php)
-	phar pack -c gz -f $@.phar -a 'gitops' -s stub.php $^
-	mv $@.phar $@
+bin/gitops.phar: $(wildcard src/*.php src/*/*.php)
+	phar pack -c gz -f $@ -a 'gitops' -s stub.php $^
 	chmod +x $@
 
-gitops.tar.gz: gitops
-	tar -czf $@ gitops
+.PHONY: test
+test: bin/phpunit.phar var/cache/phpunit var/www/phpunit
+	 XDEBUG_MODE=coverage php bin/phpunit.phar
+
+bin/phpunit.phar:
+	wget -O bin/phpunit.phar https://phar.phpunit.de/phpunit-11.phar
+	chmod +x bin/phpunit.phar
+
+var/cache/phpunit:
+	mkdir -p var/cache/phpunit
+
+var/www/phpunit:
+	mkdir -p var/www/phpunit
